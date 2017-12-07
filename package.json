@@ -1,0 +1,9 @@
+{
+  "name": "nodecord",
+  "version": "1.0.0",
+  "description": "A module written using NodeJS for creating a discord bot. Uses snodesocket for the websockets.",
+  "main": "nodecord.js",
+  "author": "Nicholas J D Dean",
+  "license": "MIT",
+  "private": false
+}
