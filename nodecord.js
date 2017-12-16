@@ -1,14 +1,11 @@
 //Author: Nicholas J D Dean
-//Date created: 2016-12-06
+//Date created: 2017-12-06
+
 const { URL } = require('url');
 const https = require('https');
+const wss = require('../snodesock/snodesock');
 
-const wss = require('./websocket.js');
 const baseURL = 'https://discordapp.com/api';
-const botToken = 'Mzg3Nzk0NDU1OTkxOTQzMTg2.DQjtew.rRoDSZicamMk3mIrRZUdKgZgZTo';
-
-let hearbeatIntervalObj;
-let previousS = null;
 
 
 const GatewayOpcodes = {
@@ -27,140 +24,124 @@ const GatewayOpcodes = {
 }
 
 
-//pretty print some data in a box
-//with a title to the console.
-function logData(title, data) {
-    const length = 60;
-    const tLength = title.length;
+class DiscordBot {
+    constructor(botToken) {
+        this.token = botToken;
+        this.socket = null;
+        this.heartbeatIntervalObj = null;
+        this.lastSequenceNum = null;
+        this.hearbeatAcknowledged = null;
+        this.sessionID = null;
+        this.endpointURL = null;
+        this.resuming = false;
+    }
 
-    const startPos = Math.floor((length / 2) - (tLength / 2));
 
-    let headerString = '';
 
-    //print header
-    for (let i = 0; i < length; ++i) {
-        if (i < startPos) {
-            headerString += '=';
-        } else if (i < startPos + tLength) {
-            headerString += title[i - startPos];
+    //Send a GET request to the API to retrieve a valid
+    //URL for the websocket connection
+    _requestValidWSEndpoint() {
+        return new Promise((resolve, reject) => {
+            const gatewayURL = new URL(baseURL + '/gateway/bot');
+
+            gatewayURL.searchParams.append('token', this.token);
+            
+            //Get Gateway Bot
+            https.get(gatewayURL, (res) => {
+            
+                if (res.statusCode != 200) {
+                    reject(res.statusCode);
+                }
+
+                res.on('data', (data) => {
+                    let obj = JSON.parse(data.toString());
+        
+                    resolve(obj);
+                });
+            });
+        });
+    }
+
+
+
+    _heartbeat() {
+        if (this.hearbeatAcknowledged === false) {
+            console.log('No heartbeat ACK. Reconnecting...');
+            
+            this.reconnect();
         } else {
-            headerString += '=';
+            //send a heartbeat
+            this.hearbeatAcknowledged = false;
+            this._sendOpcode(1, this.lastSequenceNum)
         }
     }
 
-    console.log(headerString);
-    console.log(data);
+
+
+    _handleGatewayObject(obj) {         
+        console.log(`Received OP ${obj.op}: ${GatewayOpcodes[obj.op]}`)
     
-    let footer = '';
-
-    for (let i = 0; i < length; ++i) {
-        footer += '_';
-    }
-    
-    console.log(footer + '\n');
-}
-
-
-
-//Send a GET request to the API to retrieve a valid
-//URL for the websocket connection
-function requestValidWSEndpoint() {
-    return new Promise((resolve, reject) => {
-        const gatewayURL = new URL(baseURL + '/gateway/bot');
-
-        gatewayURL.searchParams.append('token', botToken);
         
-        //Get Gateway Bot
-        https.get(gatewayURL, (res) => {
-        
-            if (res.statusCode != 200) {
-                reject(res.statusCode);
-            }
+        switch (GatewayOpcodes[obj.op]) {
+            case 'Dispatch':
+                this.lastSequenceNum = obj.s;
+                this._handleDispatch(obj);
+                break;
 
-            res.on('data', (data) => {
-                console.log("Received endpoint");
-                let obj = JSON.parse(data.toString());
+            case 'Heartbeat':
+                this._heartbeat(this.lastSequenceNum);
+                break;
+
+            case 'Reconnect':
+                this.reconnect();
+                break;
     
-                resolve(obj);
-            });
-        }); 
-    });
-}
+            case 'Invalid Session':
+                this.socket.end();
+                break;
+    
+            case 'Hello':
+                this._handleHello(obj.d.heartbeat_interval);
+                break;
 
-
-
-//construct a Gateway Opcode and have it sent
-//to the server.
-function sendOpcode(socket, op, d, s, t) {
-    let obj = {
-        op: op,
-        d: d
-    };
-
-    if (s != undefined) {
-        obj.s = s;
+            case 'Heartbeat ACK':
+                this.hearbeatAcknowledged = true;
+                break;
+        }   
     }
 
-    if (t != undefined) {
-        obj.t = t;
+
+
+    _handleDispatch(dispatch) {
+        console.log(`Dispatch received: ${dispatch.t}`);
+    
+        switch(dispatch.t) {
+            case 'READY':
+                this.sessionID = dispatch.d.session_id;
+                break;
+
+            case 'RESUMED':
+                this.resuming = false;
+                break;
+        }
     }
 
-    console.log(`Sending OP ${op}: ${GatewayOpcodes[op]}`);
-
-    socket.write(obj);
-}
 
 
+    _handleHello(interval) {        
+        //create a function to be run every interval
+        //and store it in an object so that it can
+        //be stopped in the future
+        this.heartbeatIntervalObj = setInterval(() => { 
+            this._heartbeat();
+        }, interval);
 
-function handleDispatch(socket, dispatch) {
+        console.log(`Heartbeat set to ${interval}ms`);
 
-    console.log(`Dispatch event: ${dispatch.t}`);
-
-    switch(dispatch.t) {
-        case 'READY':
-            //store the session id
-            break;
-
-        case 'GUILD_CREATE':
-            //get the channel id
-            break;
-
-        case 'MESSAGE_CREATE':
-            //send a reply
-            break;
-    }
-}
-
-
-
-function handleGatewayObject(socket, obj) {    
-
-    console.log(`Received OP ${obj.op}: ${GatewayOpcodes[obj.op]}`)
-
-    switch (obj.op) {
-        case 0: //dispatch
-            handleDispatch(socket, obj);
-            break;
-
-        case 9:
-            socket.end();
-            break;
-
-        case 10: //Hello
-
-            const interval = obj.d.heartbeat_interval;
-
-            //create a function to be run every interval
-            hearbeatIntervalObj = setInterval(() => { 
-                //send a heartbeat
-                sendOpcode(socket, 1, previousS)
-            }, interval);
-
-            console.log(`Heartbeat set to ${interval}ms`);
-
-            //send the identify opcode
-            sendOpcode(socket, 2, {
-                token: botToken,
+        if (this.resuming === false) {
+            //send OP 2: IDENTIFY
+            this._sendOpcode(2, {
+                token: this.token,
                 properties: {},
                 compress: false,
                 large_threshold: 100,
@@ -172,56 +153,81 @@ function handleGatewayObject(socket, obj) {
                     }
                 }
             });
-            break;
-    }   
+        } else {
+            //send OP 6: RESUME
+            this._sendOpcode(6, {
+                token: this.token,
+                session_id: this.sessionID,
+                seq: this.lastSequenceNum
+            });
+        }
+    }
+
+
+
+    //construct a Gateway Opcode and have it sent
+    //to the server.
+    _sendOpcode(op, d, s, t) {
+        let obj = {
+            op: op,
+            d: d,
+            s: s,
+            t: t
+        };
+
+        console.log(`Sending OP ${op}: ${GatewayOpcodes[op]}`);
+
+        this.socket.write(obj);
+    }
+
+    
+
+    _reconnect() {
+        this.resuming = true;
+        this.hearbeatAcknowledged = null;
+        this.connect();
+    }
+
+
+
+    async connect() {
+        //Technically, this endpoint should be updated
+        //even on a reconnect. But in practice I think it 
+        //will never change, so only request on the first
+        //connection to improve reconnect times,
+        if (this.endpointURL === null) {
+            console.log('Requesting endpoint...');
+            const endpoint = await this._requestValidWSEndpoint();
+            
+            this.endpointURL = endpoint.url;
+        }
+
+        //if attempting to resume the connection, end the old one.
+        if (this.resuming) {
+            this.socket.socket.end();
+        }
+
+        console.log(`Connecting to '${this.endpointURL}'...`);
+
+        this.socket = new wss(this.endpointURL);
+    
+        this.socket.on('data', (data) => {
+            this._handleGatewayObject(JSON.parse(data));
+        });
+    
+        this.socket.on('end', () => {
+            console.log('Socket ended');
+   
+            clearInterval(this.heartbeatIntervalObj);
+        });
+    }
+
+
+
+
+
+    updateStatus() {
+
+    }
 }
-
-
-
-//Handle data received from the server
-function handleData(socket, data) {
-
-    //websocket opcodes
-    switch(data.opcode) {
-        case 0x1: //text frame
-            //assume that a text frame is a Discord Gateway Dispatch
-            //take the payload and handle it
-            handleGatewayObject(socket, JSON.parse(data.payload));
-            break;
-
-        case 0x8: //connection close
-            console.log('Disconnect frame received');
-            break;
-
-        default:
-            console.log('Unhandled opcode received: ' + data.opcode);
-            break;
-    }    
-}
-
-
-
-async function connect() {
-    console.log('Requesting endpoint...');
-    const endpoint = await requestValidWSEndpoint();
-    const socket = new wss(endpoint.url);
-
-    console.log('Connecting socket...');
-
-    socket.on('connected', () => {
-        console.log('Socket connected');
-    });
-
-    socket.on('data', (data) => {
-        handleData(socket, data);
-    });
-
-    socket.on('end', () => {
-        console.log('Socket disconnected');
-        clearInterval(hearbeatIntervalObj);
-    })
-}
-
-
-
-connect();
+module.exports = DiscordBot;
