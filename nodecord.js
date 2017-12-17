@@ -1,11 +1,22 @@
-//Author: Nicholas J D Dean
-//Date created: 2017-12-06
+// Author: Nicholas J D Dean
+// Date created: 2017-12-06
+
+// Log levels
+// 0  - none
+// 1  - errors
+// 2  - warnings
+// 3  - general status info (connecting)
+// 4  - full status info (connection successful) and dispatch events
+// 5  - OP send and receives except heartbeat
+// 6  - all OP send and receives
 
 const { URL } = require('url');
 const https = require('https');
 const wss = require('../snodesock/snodesock');
+const Loga = require('../loga/loga');
 
 const baseURL = 'https://discordapp.com/api';
+const loga = new Loga();
 
 const GatewayOpcodes = {
     0: 'Dispatch',
@@ -24,8 +35,9 @@ const GatewayOpcodes = {
 
 
 class DiscordBot {
-    constructor(botToken) {
+    constructor(botToken, logLevel = 0) {
         this.token = botToken;
+        this.shardCount = null;
         this.socket = null;
         this.heartbeatIntervalObj = null;
         this.lastSequenceNum = null;
@@ -34,14 +46,21 @@ class DiscordBot {
         this.endpointURL = null;
         this.resuming = false;
 
-        this.callbacks = {};
+        //the object that stores the callbacks registered
+        //using the onDispatch function
+        this.dispatchCallbacks = {};
+
+        this.commandChar = '!';
+        this.commandCallbacks = {};
+
+        loga.level = logLevel;
     }
 
 
 
     //Send a GET request to the API to retrieve a valid
     //URL for the websocket connection
-    _requestValidWSEndpoint() {
+    _getGatewayBot() {
         return new Promise((resolve, reject) => {
             const gatewayURL = new URL(baseURL + '/gateway/bot');
 
@@ -49,8 +68,10 @@ class DiscordBot {
             
             //Get Gateway Bot
             https.get(gatewayURL, (res) => {
-            
-                if (res.statusCode != 200) {
+                const code = res.statusCode;
+
+                if (code != 200) {
+                    loga.error(`Endpoint request not okay. Status: ${code}`);
                     reject(res.statusCode);
                 }
 
@@ -59,6 +80,8 @@ class DiscordBot {
         
                     resolve(obj);
                 });
+            }).on('error', err => {
+                loga.error('Endpoint request failed, check connection');
             });
         });
     }
@@ -67,7 +90,7 @@ class DiscordBot {
 
     _heartbeat() {
         if (this.hearbeatAcknowledged === false) {
-            console.log('No heartbeat ACK. Reconnecting...');
+            loga.warn('No heartbeat ACK. Reconnecting');
             
             this.reconnect();
         } else {
@@ -79,10 +102,15 @@ class DiscordBot {
 
 
 
-    _handleGatewayObject(obj) {         
-        console.log(`Received OP ${obj.op}: ${GatewayOpcodes[obj.op]}`)
+    _handleGatewayObject(obj) {   
+        const opName = GatewayOpcodes[obj.op];
+        
+        //Heartbeats clutter logs, so give them a higher level
+        //allowing them to be specifically excluded
+        const logLevel = opName === 'Heartbeat ACK' ? 6 : 5;
+        loga.log(`Received OP ${obj.op}: ${opName}`, logLevel);
     
-        switch (GatewayOpcodes[obj.op]) {
+        switch (opName) {
             case 'Dispatch':
                 this.lastSequenceNum = obj.s;
                 this._handleDispatch(obj.t, obj.d);
@@ -113,7 +141,7 @@ class DiscordBot {
 
 
     _handleDispatch(dispatchName, data) {
-        console.log(`Dispatch received: ${dispatchName}`);
+        loga.log(`Dispatch event: ${dispatchName}`, 4);
 
         this._emitEvent(dispatchName, data);
     
@@ -121,6 +149,26 @@ class DiscordBot {
             case 'READY':
                 this.sessionID = data.session_id;
                 break;
+
+            case 'MESSAGE_CREATE':
+                //check for a command
+                if (data.content[0] === this.commandChar) {
+                    //remove the commandChar
+                    const command = data.content.substr(1, data.content.length - 1);
+
+                    //split the command by spaces to take the first word
+                    const commandWord = command.split(' ')[0];
+                    const firstWordEnd = command.indexOf(' ');
+                    const length = command.length - firstWordEnd;
+
+                    //add 1 to remove the space after the command word
+                    const restOfCommand = command.substr(firstWordEnd+1, length);
+
+                    loga.log(`Command received: ${commandWord}`);
+
+                    //callback with all the rest of the command
+                    this.commandCallbacks[commandWord](restOfCommand);
+                }
 
             case 'RESUMED':
                 this.resuming = false;
@@ -138,7 +186,7 @@ class DiscordBot {
             this._heartbeat();
         }, interval);
 
-        console.log(`Heartbeat set to ${interval}ms`);
+        loga.log(`Heartbeat set to ${interval}ms`);
 
         if (this.resuming === false) {
             //send OP 2: IDENTIFY
@@ -147,12 +195,14 @@ class DiscordBot {
                 properties: {},
                 compress: false,
                 large_threshold: 100,
-                presence: {
+                presence: { //status object
+                    since: null,
                     status: "online",
                     game: {
-                        name: "Waiting",
-                        type: 1
-                    }
+                        name: "arpund",
+                        type: 0
+                    },
+                    afk: false
                 }
             });
         } else {
@@ -177,7 +227,9 @@ class DiscordBot {
             t: t
         };
 
-        console.log(`Sending OP ${op}: ${GatewayOpcodes[op]}`);
+        //Place heartbeats on a higher log level.
+        const logLevel = GatewayOpcodes[op] === 'Heartbeat' ? 6 : 5;
+        loga.log(`Sending OP ${op}: ${GatewayOpcodes[op]}`, logLevel);
 
         this.socket.write(obj);
     }
@@ -185,15 +237,29 @@ class DiscordBot {
 
 
     _emitEvent(eventName, param) {
-        if (this.callbacks[eventName]) {
-            this.callbacks[eventName](param);
+        if (this.dispatchCallbacks[eventName]) {
+            this.dispatchCallbacks[eventName](param);
         }
     }
 
 
 
+    //register a callback to be run whenever
+    //the specified dispatch event is received
+    //this will accept either format for the event
+    //names
     onEvent(eventName, callback) {
-        this.callbacks[eventName] = callback;
+        const eName = eventName.toUpperCase().replace(' ', '_');
+        this.dispatchCallbacks[eName] = callback;
+    }
+
+
+
+    //register a callback to be run when a
+    //specific command word is placed after
+    //this.commandChar
+    registerCommand(keyWord, callback) {
+        this.commandCallbacks[keyWord] = callback;
     }
 
     
@@ -208,14 +274,15 @@ class DiscordBot {
 
     async connect() {
         //Technically, this endpoint should be updated
-        //even on a reconnect. But in practice I think it 
+        //even on a reconnect. But in practice I think it
         //will never change, so only request on the first
         //connection to improve reconnect times,
         if (this.endpointURL === null) {
-            console.log('Requesting endpoint...');
-            const endpoint = await this._requestValidWSEndpoint();
+            loga.log('Requesting endpoint');
+            const endpoint = await this._getGatewayBot();
             
             this.endpointURL = endpoint.url;
+            this.shardCount = endpoint.shards;
         }
 
         //if attempting to resume the connection, end the old one.
@@ -223,7 +290,7 @@ class DiscordBot {
             this.socket.socket.end();
         }
 
-        console.log(`Connecting to '${this.endpointURL}'...`);
+        loga.log(`Connecting to '${this.endpointURL}'`);
 
         this.socket = new wss(this.endpointURL);
     
@@ -232,27 +299,64 @@ class DiscordBot {
         });
     
         this.socket.on('end', () => {
-            console.log('Socket ended');
+            loga.log('End of socket');
    
             clearInterval(this.heartbeatIntervalObj);
+        });
+
+        this.socket.on('host_disconnect', (data) => {
+            loga.error(`Socket disconnected by host. Reason: ${data}`);
         });
     }
 
 
 
+    //sends a status update object as
+    //defined in the developer docs
+    statusUpdate(status, game = null, since = null, afk = false) {
+        this._sendOpcode(3, {
+            since: since,
+            game: game,
+            status: status,
+            afk: afk
+        });
+    }
+
+
+
+    voiceStateUpdate(
+        guildID,
+        channelID,
+        selfMute = false,
+        selfDeaf = false
+    ) {
+        this._sendOpcode(4, {
+            guild_id: guildID,
+            channel_id: channelID,
+            selfMute: selfMute,
+            selfDeaf: selfDeaf
+        });
+    }
+
+
+
+    //send a message to the given channel
     sendMessage(channelID, content) {
-        const endpoint = `/channels/${channelID}/messages`;
         const obj = {
             content: content
         }
 
-        apiPost(this.token, endpoint, obj);
+        apiPost(this.token, `/channels/${channelID}/messages`, obj);
     }
 }
 module.exports = DiscordBot;
 
 
 
+//send a post request to the given api endpoint.
+//the discord api requires the token for these
+//endpoints to be specified in an Authorization
+//header.
 function apiPost(token, endpoint, data) {
     const url = new URL(baseURL + endpoint);
     const options = {
@@ -265,8 +369,13 @@ function apiPost(token, endpoint, data) {
         }
     }
 
+    loga.log(`POST ${endpoint}`, 4);
+
     const req = https.request(options, res => {
-        //nothing
+
+        if (res.statusCode != 200) {
+            loga.error(`POST failed. Status: ${res.statusCode}`);
+        }
     });
 
     req.write(JSON.stringify(data));
