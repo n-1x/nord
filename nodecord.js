@@ -7,7 +7,6 @@ const wss = require('../snodesock/snodesock');
 
 const baseURL = 'https://discordapp.com/api';
 
-
 const GatewayOpcodes = {
     0: 'Dispatch',
     1: 'Heartbeat',
@@ -34,6 +33,8 @@ class DiscordBot {
         this.sessionID = null;
         this.endpointURL = null;
         this.resuming = false;
+
+        this.callbacks = {};
     }
 
 
@@ -81,11 +82,10 @@ class DiscordBot {
     _handleGatewayObject(obj) {         
         console.log(`Received OP ${obj.op}: ${GatewayOpcodes[obj.op]}`)
     
-        
         switch (GatewayOpcodes[obj.op]) {
             case 'Dispatch':
                 this.lastSequenceNum = obj.s;
-                this._handleDispatch(obj);
+                this._handleDispatch(obj.t, obj.d);
                 break;
 
             case 'Heartbeat':
@@ -112,12 +112,14 @@ class DiscordBot {
 
 
 
-    _handleDispatch(dispatch) {
-        console.log(`Dispatch received: ${dispatch.t}`);
+    _handleDispatch(dispatchName, data) {
+        console.log(`Dispatch received: ${dispatchName}`);
+
+        this._emitEvent(dispatchName, data);
     
-        switch(dispatch.t) {
+        switch(dispatchName) {
             case 'READY':
-                this.sessionID = dispatch.d.session_id;
+                this.sessionID = data.session_id;
                 break;
 
             case 'RESUMED':
@@ -180,9 +182,23 @@ class DiscordBot {
         this.socket.write(obj);
     }
 
+
+
+    _emitEvent(eventName, param) {
+        if (this.callbacks[eventName]) {
+            this.callbacks[eventName](param);
+        }
+    }
+
+
+
+    onEvent(eventName, callback) {
+        this.callbacks[eventName] = callback;
+    }
+
     
 
-    _reconnect() {
+    reconnect() {
         this.resuming = true;
         this.hearbeatAcknowledged = null;
         this.connect();
@@ -224,10 +240,35 @@ class DiscordBot {
 
 
 
+    sendMessage(channelID, content) {
+        const endpoint = `/channels/${channelID}/messages`;
+        const obj = {
+            content: content
+        }
 
-
-    updateStatus() {
-
+        apiPost(this.token, endpoint, obj);
     }
 }
 module.exports = DiscordBot;
+
+
+
+function apiPost(token, endpoint, data) {
+    const url = new URL(baseURL + endpoint);
+    const options = {
+        hostname: url.hostname,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bot ${token}`
+        }
+    }
+
+    const req = https.request(options, res => {
+        //nothing
+    });
+
+    req.write(JSON.stringify(data));
+    req.end();
+}
