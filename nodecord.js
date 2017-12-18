@@ -167,7 +167,7 @@ class DiscordBot {
                     loga.log(`Command received: ${commandWord}`);
 
                     //callback with all the rest of the command
-                    this.commandCallbacks[commandWord](restOfCommand);
+                    this.commandCallbacks[commandWord](restOfCommand, data);
                 }
 
             case 'RESUMED':
