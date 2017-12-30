@@ -151,18 +151,19 @@ class DiscordBot {
                 break;
 
             case 'MESSAGE_CREATE':
+                const msg = data.content;
                 //check for a command
-                if (data.content[0] === this.commandChar) {
+                if (msg[0] === this.commandChar) {
                     //remove the commandChar
-                    const command = data.content.substr(1, data.content.length - 1);
+                    const command = msg.substr(1, msg.length - 1);
 
                     //split the command by spaces to take the first word
                     const commandWord = command.split(' ')[0];
-                    const firstWordEnd = command.indexOf(' ');
-                    const length = command.length - firstWordEnd;
+                    const firstSpace = command.indexOf(' ');
+                    const len = command.length - firstSpace;
 
                     //add 1 to remove the space after the command word
-                    const restOfCommand = command.substr(firstWordEnd+1, length);
+                    const restOfCommand = command.substr(firstSpace+1, len);
 
                     loga.log(`Command received: ${commandWord}`);
 
@@ -198,10 +199,7 @@ class DiscordBot {
                 presence: { //status object
                     since: null,
                     status: "online",
-                    game: {
-                        name: "arpund",
-                        type: 0
-                    },
+                    game: null,
                     afk: false
                 }
             });
@@ -324,22 +322,6 @@ class DiscordBot {
 
 
 
-    voiceStateUpdate(
-        guildID,
-        channelID,
-        selfMute = false,
-        selfDeaf = false
-    ) {
-        this._sendOpcode(4, {
-            guild_id: guildID,
-            channel_id: channelID,
-            selfMute: selfMute,
-            selfDeaf: selfDeaf
-        });
-    }
-
-
-
     //send a message to the given channel
     sendMessage(channelID, content) {
         const obj = {
@@ -348,6 +330,28 @@ class DiscordBot {
 
         apiPost(this.token, `/channels/${channelID}/messages`, obj);
     }
+    
+    
+    
+    async joinVoiceChannel(
+        channelID,
+        selfMute = false,
+        selfDeaf = false
+    ) {
+        //get the channel object of the specified channel
+        //from the API.
+        const channelObj = await apiGet(this.token, `/channels/${channelID}`);
+        //GET the guild, check all channels for that user. If found,
+        //voiceChannelID is that channel's ID.
+        const voiceChannelID;
+
+        this._sendOpcode(4, {
+            guild_id: channelObj.guild_id,
+            channel_id: channelID,
+            self_mute: selfMute,
+            self_deaf: selfDeaf
+        });
+    }    
 }
 module.exports = DiscordBot;
 
@@ -380,4 +384,39 @@ function apiPost(token, endpoint, data) {
 
     req.write(JSON.stringify(data));
     req.end();
+}
+
+
+
+function apiGet(token, endpoint) {
+    const url = new URL(baseURL + endpoint);
+    const options = {
+        hostname: url.hostname,
+        path: url.pathname,
+        method: 'GET',
+        headers: {
+           'Content-Type': 'application/json',
+           'Authorization': `Bot ${token}` 
+        }
+    }
+
+    loga.log(`GET ${endpoint}`);
+
+    return new Promise((resolve, reject) => {
+        https.get(options, res => {
+            const code = res.statusCode;
+            let data = '';
+
+            res.on('data', chunk => {
+                data += chunk;
+            });
+
+            res.on('end', () => {
+                resolve(JSON.parse(data));
+            });
+        }).on('error', err => {
+            loga.error('GET failed. Check connection.');
+            reject(err);
+        });
+    });
 }
