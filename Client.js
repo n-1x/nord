@@ -1,91 +1,103 @@
-//Author: Nicholas J D Dean
-
-// Log levels
-// 0  - none
-// 1  - errors
-// 2  - warnings
-// 3  - general status info (connecting)
-// 4  - full status info (connection successful) and dispatch events
-// 5  - OP send and receives except heartbeat
-// 6  - all OP send and receives
-
 const WSS = require('../snodesock/snodesock');
 const Discord = require('./Discord');
 
-const GatewayOpcodes = {
-    0: 'Dispatch',
-    1: 'Heartbeat',
-    2: 'Identify',
-    3: 'Status Update',
-    4: 'Voice State Update',
-    5: 'Voice Server Ping',
-    6: 'Resume',
-    7: 'Reconnect',
-    8: 'Request Guild Members',
-    9: 'Invalid Session',
-    10: 'Hello',
-    11: 'Heartbeat ACK'
-}
+/**
+ * All the opcodes that go through the gateway. Some can
+ * only be sent and some can only be received.
+ * @const
+ * @type {Object}
+ */
 
 
 
+/** 
+ * Extends the Discord class but will also create and maintain
+ * a connection to the gateway, allowing some extra functions.
+ * @author Nicholas J D Dean <nickdean.io>
+ * @extends Discord
+ * @prop {boolean} isBot - Is the token associated with this client
+ * a bot or not. This affects the authorization headers and gateway
+ * endpoints.
+ * @prop {number} shardCount - The number of shards received when requesting
+ * the gateway URL.
+ * @prop {Object} socket - The websocket used to communicate with the gateway.
+ * @prop {Object} me - The object containing the current user.
+ * This will be set when the 'ready' dispatch is received.
+ * @prop {Object} heartbeatIntervalObj - The object returned by the
+ * setInterval() call for the hearbeat function. Needed to stop the 
+ * heartbeat function being called after the connection is closed.
+ * @prop {number} lastSequenceNum - The last sequence number received
+ * from the gateway. Needed for resuming a session and heartbeats.
+ * @prop {boolean} hearbeatAcknowledged - Whether or not the last
+ * heartbeat was acknowledged by the server.
+ * @prop {string} sessionID - The session ID received from the server
+ * that can be used to resume the session when reconnecting.
+ * @prop {boolean} resuming - Is the client currently attempting to
+ * resume the connection. A few functions will behave differently if
+ * they're connecting for the first time or attempting a resume.
+ * @prop {Object} dispatchCallbacks - The object that stores all callbacks
+ * resgistered to certain dispatch events. The keys are the event names and
+ * the values are the callbacks.
+ * @prop {string} commandChar - The character that needs to be the first
+ * character in a message for it to be considered a command.
+ * @prop {Object} commandCallbacks - The object that stores all callbacks
+ * registered to different command words. The keys are the command words
+ * and the values are the callbacks.
+ * @prop {Object} guilds - All guilds that the bot is in. These need to be
+ * stored because when requesting a guild from the API, you don't get all the
+ * information that you do in a GUILD_CREATE event.
+ * @prop {Object} GatewayOpcodes - All the opcodes that go through
+ * the gateway and their meanings.
+ */
 class Client extends Discord {
-    constructor(token, isBot, logLevel = 0) {
-        super(token, isBot, logLevel);
+    /** Create a connection to the gateway. 
+     * @param {string} token - The secret_key to use when 
+     * interfacing with the API.
+     * @param {boolean} isBot - Is the secret key associated with a bot
+     * account or not.
+    */
+    constructor(token, isBot = true) {
+        super(token);
+        this.GatewayOpcodes = {
+            0: 'Dispatch',
+            1: 'Heartbeat',
+            2: 'Identify',
+            3: 'Status Update',
+            4: 'Voice State Update',
+            5: 'Voice Server Ping',
+            6: 'Resume',
+            7: 'Reconnect',
+            8: 'Request Guild Members',
+            9: 'Invalid Session',
+            10: 'Hello',
+            11: 'Heartbeat ACK'
+        }
 
+        this.isBot = isBot
         this.shardCount = null;
         this.socket = null;
-
-        //the object containing the current user. This can be set
-        //when receiving the 'ready' dispatch, as that contains
-        //a user object of the current user.
         this.me = null;
-
-        //the object returned by the setInterval() call
-        //for sending the heartbeat to the gateway. 
-        //Needed to stop sending those calls.
         this.heartbeatIntervalObj = null;
-
-        //the last sequence number received from the gateway
-        //needed for resuming a session
         this.lastSequenceNum = null;
-
-        //used for checking if a heartbeat was acknowledged
-        //by the server when it's time to send a new one. If 
-        //it wasn't then disconnect and attempt to resume.
         this.hearbeatAcknowledged = null;
         this.sessionID = null;
-
-        //set to true while attempting to resume a connection
-        //this will change what opcodes are send to identify
-        //with the gateway 
         this.resuming = false;
-        
-        //the object that stores the callbacks registered
-        //using the onDispatch function
         this.dispatchCallbacks = {};
-        
-        //character that indicates that the contents of a message
-        //are a command
         this.commandChar = '!';
-
-        //list of callback functions for commands, indexed by their
-        //'command word'.
         this.commandCallbacks = {};
-
-        //will hold the list of the full guild objects
-        //that are received on a guild create event. These
-        //objects contain more information than can be requested
-        //through the API, so it's important to keep them.
         this.guilds = {};
-        
-        this.loga.level = logLevel;
-
         this._gatewayConnect();
     }
     
     
-    
+    /**
+     * Check if the previous heartbeat was acknowledged. If it wasn't,
+     * then attempt to reconnect. Else send another heartbeat.
+     * 
+     * This should be called according to the heartbeat_interval received
+     * in the 'hello' message from the server.
+     * @private
+     */
     _heartbeat() {
         if (this.hearbeatAcknowledged === false) {
             this.loga.warn('No heartbeat ACK. Reconnecting');
@@ -99,7 +111,12 @@ class Client extends Discord {
     }
     
     
-    
+    /**
+     * Respond to data received through the websocket connected
+     * to the gateway.
+     * @private
+     * @param {Object} obj - A gateway object received from the server. 
+     */
     _handleGatewayObject(obj) {   
         const opName = GatewayOpcodes[obj.op];
         
@@ -143,7 +160,12 @@ class Client extends Discord {
     }
     
     
-    
+    /**
+     * Handle an opcode 0 received through the gateway,
+     * @private
+     * @param {string} dispatchName - The dispatch event name.
+     * @param {*} data - The contents of the 'd' attribute of the gateway object.
+     */
     _handleDispatch(dispatchName, data) {
         this.loga.log(`Dispatch event: ${dispatchName}`, 4);
         
@@ -189,7 +211,13 @@ class Client extends Discord {
     }
     
     
-    
+    /**
+     * To be run when the hello gateway object is received.
+     * Either sends an identify opcode back, or attempts to
+     * resume the previous session, depending on this.resuming. 
+     * @private
+     * @param {int} interval - The heartbeat interval received in the hello payload.
+     */
     _handleHello(interval) {        
         //create a function to be run every interval
         //and store it in an object so that it can
@@ -226,9 +254,15 @@ class Client extends Discord {
     
     
     
-    //construct a Gateway Opcode and have it sent
-    //to the server.
-    _sendOpcode(op, d, s, t) {
+    /**
+     * Send an opcode to the gateway.
+     * @private
+     * @param {int} op - Opcode for the payload.
+     * @param {Object} d - Event data.
+     * @param {int} s - Sequence number, used for resuming sessions and heartbeats.
+     * @param {string} t - The event name for the payload.
+     */
+    _sendOpcode(op, d, s = null, t = null) {
         let obj = {
             op: op,
             d: d,
@@ -244,19 +278,35 @@ class Client extends Discord {
     }
     
     
-    
-    _emitEvent(eventName, param) {
+    /**
+     * Run the callback associated with a specific event, if one has
+     * been registered using the onEvent function. Sends all data that was
+     * received in the dispatch with the event.
+     * 
+     * For example, the 'MESSAGE_CREATE' event is send with the full
+     * message object that was created. This will be passed as a parameter
+     * to the callback.
+     * @private
+     * @param {string} eventName - The event name. 
+     * @param {object} eventData - The data associated with the event.
+     */
+    _emitEvent(eventName, eventData) {
         if (this.dispatchCallbacks[eventName]) {
-            this.dispatchCallbacks[eventName](param);
+            this.dispatchCallbacks[eventName](eventData);
         }
     }
 
 
 
+    /**
+     * Fetch the gateway endpoint then attempt to establish a 
+     * websocket connection.
+     * @private
+     */
     async _gatewayConnect() {
         this.loga.log('Requesting endpoint');
         const endpoint = this.isBot ? '/gateway/bot' : '/gateway';
-        const gateway = await this.apiRequest('GET', endpoint);
+        const gateway = await this._apiRequest('GET', endpoint);
         
         this.shardCount = gateway.shards;
         
@@ -269,7 +319,7 @@ class Client extends Discord {
         
         this.socket = new WSS(gateway.url);
         
-        this.socket.on('data', (data) => {
+        this.socket.on('data', data => {
             this._handleGatewayObject(JSON.parse(data));
         });
         
@@ -279,13 +329,14 @@ class Client extends Discord {
             clearInterval(this.heartbeatIntervalObj);
         });
         
-        this.socket.on('host_disconnect', (data) => {
-            this.loga.error(`Socket disconnected by host. Reason: ${data}`);
+        this.socket.on('host_disconnect', data => {
+            this.loga.error(`Socket disconnected by host: ${data}`);
         });
     }
     
     
     
+    /** Begin the process of reconnecting to the gateway. */
     reconnect() {
         this.resuming = true;
         this.hearbeatAcknowledged = null;
@@ -294,10 +345,13 @@ class Client extends Discord {
     
     
     
-    //register a callback to be run whenever
-    //the specified dispatch event is received
-    //this will accept either format for the event
-    //names
+    /**
+     * Register a callback to be run whenever the specified
+     * dispatch event is received. Accepts either format for the event
+     * names.
+     * @param {string} eventName - The name of the event. Not case sensitive and accepts both spaces and underscores.
+     * @param {function} callback - The function to be run when the given event occurs.
+     */
     onEvent(eventName, callback) {
         const eName = eventName.toUpperCase().replace(' ', '_');
         this.dispatchCallbacks[eName] = callback;
@@ -305,27 +359,26 @@ class Client extends Discord {
     
     
     
-    //register a callback to be run when a
-    //specific command word is placed after
-    //this.commandChar
+    /**
+     * Register a callback to be run whenever a message is received that
+     * begins with this.commandChar followed by keyWord.
+     * @param {*} keyWord 
+     * @param {*} callback 
+     */
     registerCommand(keyWord, callback) {
         this.commandCallbacks[keyWord] = callback;
     }
 
 
 
-    getCurrentUser() {
-        if (this.me) {
-            return this.me;
-        } else {
-            return super.apiRequest('GET', '/users/@me');
-        }
-    }
-    
-    
-    
-    //sends a status update object as
-    //defined in the developer docs
+    /**
+     * Send a presence or status update to the gateway.
+     * @param {string} status - The user's new status.
+     * @param {Object} game - Null, or the user's new activity.
+     * @param {int} since - Unix time (in milliseconds) of when the client
+     * went idle, or null if the client is not idle.
+     * @param {boolean} afk 
+     */
     statusUpdate(status, game = null, since = null, afk = false) {
         this._sendOpcode(3, {
             since: since,
@@ -337,25 +390,39 @@ class Client extends Discord {
     
     
     
-    //send a message to the given channel
-    sendMessage(channelID, content) {
-        const obj = {
-            content: content
-        }
-        
-        super.apiRequest('POST', `/channels/${channelID}/messages`, obj);
+    /**
+     * Post a message to a guild text or DM channel.
+     * If operating on a guild channel, this endpoint requires
+     * the 'SEND_MESSAGES' permission to be present on the current
+     * user. If the tts field is set to true, the SEND_TTS_MESSAGES
+     * permission is required for the message to be spoken. 
+     * Returns a message object. Fires a Message Create Gateway event.
+     * 
+     * The maximum request size when sending a message is 8MB. 
+     * @param {string} channelID - ID of the channel to send to. 
+     * @param {string} content - The message contents.
+     */
+    createMessage(channelID, content) {
+        this._apiRequest('POST', `/channels/${channelID}/messages`, 
+            { content });
     }
     
     
     
+    /**
+     * Join the specified voice channel.
+     * @param {string} channelID - Voice channel ID. 
+     * @param {*} selfMute - Is the client muted.
+     * @param {*} selfDeaf - Is the client deafened.
+     */
     async joinVoiceChannel(
         channelID,
         selfMute = false,
         selfDeaf = false
     ) {
         //get the channel object of the specified channel
-//from the API.
-        const channelObj = await apiGet(this.token, `/channels/${channelID}`);
+        //from the API.
+        const channelObj = await this._apiRequest('GET', `/channels/${channelID}`);
         const guildID = channelObj.guild_id;
         
         if (channelObj) {
@@ -376,8 +443,12 @@ class Client extends Discord {
 
 
 
-    //only needs a guildID because you can only be in one
-    //voice channel in a guild.
+    /**
+     * Leave any connected voice channel in a guild. You don't
+     * need the channel ID because you can only be in one voice
+     * channel per guild.
+     * @param {string} guildID - The ID of the guild with a connected voice channel.
+     */
     leaveVoiceChannel(guildID) {
         this._sendOpcode(4, {
             guild_id: guildID,
@@ -387,4 +458,5 @@ class Client extends Discord {
         });
     }
 }
+
 module.exports = Client;
