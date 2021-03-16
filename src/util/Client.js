@@ -1,4 +1,4 @@
-const WSS = require('../snodesock/snodesock');
+const nocket = require('../../../nocket/nocket');
 const Discord = require('./Discord');
 
 /**
@@ -117,8 +117,8 @@ class Client extends Discord {
      * @private
      * @param {Object} obj - A gateway object received from the server. 
      */
-    _handleGatewayObject(obj) {   
-        const opName = GatewayOpcodes[obj.op];
+    _handleGatewayObject(obj) {
+        const opName = this.GatewayOpcodes[obj.op];
         
         //Heartbeats clutter logs, so give them a higher level
         //allowing them to be specifically excluded
@@ -199,9 +199,11 @@ class Client extends Discord {
                     this.loga.log(`Command received: ${commandWord}`);
                     
                     //callback with all the rest of the command
-                    if (this.commandCallbacks[commandWord]) {
-                        this.commandCallbacks[commandWord](restOfCommand, callback);
-                    }                }
+                    const callback = this.commandCallbacks[commandWord];
+                    if (callback) {
+                        callback(data, restOfCommand);
+                    }
+                }
                 break;
             
             case 'RESUMED':
@@ -263,18 +265,11 @@ class Client extends Discord {
      * @param {string} t - The event name for the payload.
      */
     _sendOpcode(op, d, s = null, t = null) {
-        let obj = {
-            op: op,
-            d: d,
-            s: s,
-            t: t
-        };
-        
         //Place heartbeats on a higher log level.
-        const logLevel = GatewayOpcodes[op] === 'Heartbeat' ? 6 : 5;
-        this.loga.log(`Sending OP ${op}: ${GatewayOpcodes[op]}`, logLevel);
+        const logLevel = this.GatewayOpcodes[op] === 'Heartbeat' ? 6 : 5;
+        this.loga.log(`Sending OP ${op}: ${this.GatewayOpcodes[op]}`, logLevel);
         
-        this.socket.write(obj);
+        this.socket.write(JSON.stringify({op, d, s, t}));
     }
     
     
@@ -307,7 +302,7 @@ class Client extends Discord {
         this.loga.log('Requesting endpoint');
         const endpoint = this.isBot ? '/gateway/bot' : '/gateway';
         const gateway = await this._apiRequest('GET', endpoint);
-        
+
         this.shardCount = gateway.shards;
         
         //if attempting to resume the connection, end the old one.
@@ -317,10 +312,16 @@ class Client extends Discord {
         
         this.loga.log(`Connecting to '${gateway.url}'`);
         
-        this.socket = new WSS(gateway.url);
+        this.socket = nocket.createConnection(gateway.url);
         
         this.socket.on('data', data => {
-            this._handleGatewayObject(JSON.parse(data));
+            try {
+                this._handleGatewayObject(JSON.parse(data));
+            }
+            catch {
+                console.log("Couldn't handle a gateway object");
+                console.log(data);
+            }
         });
         
         this.socket.on('end', () => {
@@ -353,7 +354,7 @@ class Client extends Discord {
      * @param {function} callback - The function to be run when the given event occurs.
      */
     onEvent(eventName, callback) {
-        const eName = eventName.toUpperCase().replace(' ', '_');
+        const eName = eventName.toUpperCase().replaceAll(' ', '_');
         this.dispatchCallbacks[eName] = callback;
     }
     

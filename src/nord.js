@@ -4,12 +4,12 @@
 * returned by [connect()]{@link connect} will each maintain
 * their own connection to the gateway. Multiple objects should not 
 * be created with the same key.
-* @module Nodecord
+* @module nord
 * @author Nicholas J D Dean <nickdean.io>
 */
 
-const Discord = require('./Discord');
-const Client = require('./Client');
+const Discord = require('./util/Discord');
+const Client = require('./util/Client');
 
 /**
  * Create an object with functions for accessing the Discord API. This

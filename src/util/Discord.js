@@ -9,15 +9,15 @@
 
 const { URL } = require('url');
 const https = require('https');
-const Loga = require('../loga/loga');
+const Loga = require('./loga');
 
 /** 
- * A class providing functions that sends http requests
- * to the API and returns either the data from the request or,`
+ * A class providing functions that send http requests
+ * to the API and return either the data from the request or,`
  * for requests that return no data, the status code.
  * Does not connect to the gateway or provide functions
  * that require you to. Use the {@link Client} module for that.
- * @author Nicholas J D Dean <nickdean.io>
+ * @author Nicholas J D Dean <0x2a.re>
  */
 class Discord {
     /**
@@ -31,7 +31,7 @@ class Discord {
         
         //the object that does the logging
         //turn off by setting loga.level to 0
-        this.loga = new Loga(0);
+        this.loga = new Loga(6);
     }
     
     
@@ -44,7 +44,7 @@ class Discord {
      * @private
     */    
     _apiRequest(method, endpoint, data = null) {
-        const url = new URL('https://discordapp.com/api' + endpoint);
+        const url = new URL('https://discord.com/api/v8' + endpoint);
         const options = {
             hostname: url.hostname,
             path: url.pathname,
@@ -157,6 +157,12 @@ class Discord {
     getChannelMessage(channelID, messageID) {
         return this._apiRequest('GET',
             `/channels/${channelID}/messages/${messageID}`);
+    }
+
+
+    createMessage(channelID, message) {
+        return this._apiRequest('POST', 
+            `/channels/${channelID}/messages`, message);
     }
 
     /**
@@ -392,6 +398,24 @@ class Discord {
 
     getGuild(guildID) {
         return this._apiRequest('GET', `/guilds/${guildID}`);
+    }
+
+    /**
+     * Returns a guild member object for the specified user.
+     * @param {*} guildID 
+     * @param {*} userID 
+     */
+    getGuildMember(guildID, userID) {
+        return this._apiRequest("GET", `/guilds/${guildID}/members/${userID}`);
+    }
+
+    /**
+     * Returns a list of role objects for the guild.
+     * @param {*} guildID 
+     * @returns 
+     */
+    getGuildRoles(guildID) {
+        return this._apiRequest("GET", `/guilds/${guildID}/roles`);
     }
 
 
