@@ -308,6 +308,7 @@ class Client extends Discord {
         //if attempting to resume the connection, end the old one.
         if (this.resuming) {
             this.socket.socket.end();
+            delete this.socket;
         }
         
         this.loga.log(`Connecting to '${gateway.url}'`);
@@ -340,7 +341,8 @@ class Client extends Discord {
     /** Begin the process of reconnecting to the gateway. */
     reconnect() {
         this.resuming = true;
-        this.hearbeatAcknowledged = null;
+        clearInterval(this.heartbeatIntervalObj);
+        this.hearbeatAcknowledged = false;
         this._gatewayConnect();
     }
     

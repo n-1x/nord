@@ -3,19 +3,19 @@ class Loga {
         this.logLevel = level;
     }
 
-    log(msg, level) {
+    log(msg, level = 0) {
         if (level <= this.logLevel) {
             console.log(msg);
         }
     }
     
-    warn(msg, level) {
+    warn(msg, level = 0) {
         if (level <= this.logLevel) {
             console.warn(msg);
         }
     }
     
-    error(msg, level) {
+    error(msg, level = 0) {
         if (level <= this.logLevel) {
             console.error(msg);
         }
