@@ -79,7 +79,7 @@ class Client extends Discord {
         this.me = null;
         this.heartbeatIntervalObj = null;
         this.lastSequenceNum = null;
-        this.hearbeatAcknowledged = null;
+        this.heartbeatAcknowledged = true;
         this.sessionID = null;
         this.resuming = false;
         this.dispatchCallbacks = {};
@@ -99,13 +99,13 @@ class Client extends Discord {
      * @private
      */
     _heartbeat() {
-        if (this.hearbeatAcknowledged === false) {
+        if (this.heartbeatAcknowledged === false) {
             this.loga.warn('No heartbeat ACK. Reconnecting');
             
             this.reconnect();
         } else {
             //send a heartbeat
-            this.hearbeatAcknowledged = false;
+            this.heartbeatAcknowledged = false;
             this._sendOpcode(1, this.lastSequenceNum)
         }
     }
@@ -154,7 +154,7 @@ class Client extends Discord {
                 break;
             
             case 'Heartbeat ACK':
-                this.hearbeatAcknowledged = true;
+                this.heartbeatAcknowledged = true;
                 break;
         }   
     }
@@ -320,8 +320,8 @@ class Client extends Discord {
                 this._handleGatewayObject(JSON.parse(data));
             }
             catch {
-                console.log("Couldn't handle a gateway object");
-                console.log(data);
+                this.loga.log("Couldn't handle a gateway object");
+                this.loga.log(data);
             }
         });
         
@@ -342,7 +342,7 @@ class Client extends Discord {
     reconnect() {
         this.resuming = true;
         clearInterval(this.heartbeatIntervalObj);
-        this.hearbeatAcknowledged = false;
+        this.heartbeatAcknowledged = true;
         this._gatewayConnect();
     }
     
