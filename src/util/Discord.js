@@ -142,7 +142,7 @@ class Discord {
      * @param {string} channelID
      * @returns {Promise}
      */
-    getChannelMessages(channelID) {
+    async getChannelMessages(channelID) {
         return this._apiRequest('GET', `/channels/${channelID}/messages`);
     }
 
@@ -154,13 +154,13 @@ class Discord {
      * @param {string} messageID 
      * @returns {Promise}
      */
-    getChannelMessage(channelID, messageID) {
+    async getChannelMessage(channelID, messageID) {
         return this._apiRequest('GET',
             `/channels/${channelID}/messages/${messageID}`);
     }
 
 
-    createMessage(channelID, message) {
+    async createMessage(channelID, message) {
         return this._apiRequest('POST', 
             `/channels/${channelID}/messages`, message);
     }
@@ -177,7 +177,7 @@ class Discord {
      * @param {string} emoji
      * @returns {Promise}
      */
-    createReaction(channelID, messageID, emoji) {
+    async createReaction(channelID, messageID, emoji) {
         return this._apiRequest('PUT', `/channels/${channelID}` + 
              `/messages/${messageID}/reactions/${emoji}/@me`);
     }
@@ -190,7 +190,7 @@ class Discord {
      * @param {string} emoji 
      * @returns {Promise}
      */
-    deleteOwnReaction(channelID, messageID, emoji) {
+    async deleteOwnReaction(channelID, messageID, emoji) {
         return this._apiRequest('DELETE', `/channels/${channelID}` + 
             `/messages/${messageID}/reactions/${emoji}/@me`);
     }

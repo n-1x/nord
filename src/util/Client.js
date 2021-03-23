@@ -405,8 +405,8 @@ class Client extends Discord {
      * @param {string} channelID - ID of the channel to send to. 
      * @param {string} content - The message contents.
      */
-    createMessage(channelID, content) {
-        this._apiRequest('POST', `/channels/${channelID}/messages`, 
+    async createMessage(channelID, content) {
+        return this._apiRequest('POST', `/channels/${channelID}/messages`, 
             { content });
     }
     
