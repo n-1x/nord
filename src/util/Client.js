@@ -56,7 +56,7 @@ class Client extends Discord {
      * @param {boolean} isBot - Is the secret key associated with a bot
      * account or not.
     */
-    constructor(token, isBot = true) {
+    constructor(token, intents, isBot = true) {
         super(token);
         this.GatewayOpcodes = {
             0: 'Dispatch',
@@ -73,6 +73,7 @@ class Client extends Discord {
             11: 'Heartbeat ACK'
         }
 
+        this.intents = intents;
         this.isBot = isBot
         this.shardCount = null;
         this.socket = null;
@@ -189,18 +190,17 @@ class Client extends Discord {
                     const command = msg.substr(1, msg.length - 1);
                     
                     //split the command by spaces to take the first word
-                    const commandWord = command.split(' ')[0];
+                    const commandWord = command.split(' ')[0].toLowerCase();
                     const firstSpace = command.indexOf(' ');
                     const len = command.length - firstSpace;
                     
                     //add 1 to remove the space after the command word
                     const restOfCommand = command.substr(firstSpace+1, len);
                     
-                    this.loga.log(`Command received: ${commandWord}`);
-                    
                     //callback with all the rest of the command
                     const callback = this.commandCallbacks[commandWord];
                     if (callback) {
+                        this.loga.log(`Command received: ${commandWord}`);
                         callback(data, restOfCommand);
                     }
                 }
@@ -234,6 +234,7 @@ class Client extends Discord {
             //send OP 2: IDENTIFY
             this._sendOpcode(2, {
                 token: this.token,
+                intents: this.intents,
                 properties: {},
                 compress: false,
                 large_threshold: 100,
@@ -369,7 +370,7 @@ class Client extends Discord {
      * @param {*} callback 
      */
     registerCommand(keyWord, callback) {
-        this.commandCallbacks[keyWord] = callback;
+        this.commandCallbacks[keyWord.toLowerCase()] = callback;
     }
 
 
