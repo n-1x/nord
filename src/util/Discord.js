@@ -401,6 +401,14 @@ class Discord {
     }
 
     /**
+     * Returns a list of guild channel objects.
+     * @param {string} guildID
+     */
+    getGuildChannels(guildID) {
+        return this._apiRequest("GET", `/guilds/${guildID}/channels`);
+    }
+
+    /**
      * Returns a guild member object for the specified user.
      * @param {*} guildID 
      * @param {*} userID 
