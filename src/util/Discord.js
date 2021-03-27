@@ -418,6 +418,20 @@ class Discord {
     }
 
     /**
+     * Adds a role to a guild member. Requires the MANAGE_ROLES permission. 
+     */
+    addGuildMemberRole(guildID, userID, roleID) {
+        return this._apiRequest("PUT", `/guilds/${guildID}/members/${userID}/roles/${roleID}`);
+    }
+
+    /**
+     * Removes a role from a guild member. Requires the MANAGE_ROLES permission. 
+     */
+    removeGuildMemberRole(guildID, userID, roleID) {
+        return this._apiRequest("DELETE", `/guilds/${guildID}/members/${userID}/roles/${roleID}`);
+    }
+
+    /**
      * Returns a list of role objects for the guild.
      * @param {*} guildID 
      * @returns 
